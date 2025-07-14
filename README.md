@@ -8,7 +8,7 @@
 
 This repository contain data and code supporting the manuscript:
 
-James P. Long, et al. "Bias in Meta-Analytic Modeling of Surrogate Endpoints in Cancer Screening Trials"
+James P. Long, et al. "Bias in Meta-Analytic Modeling of Surrogate Endpoints in Cancer Screening Trials" 2025+
 
 
 ### Repository Contents
