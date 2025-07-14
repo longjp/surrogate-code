@@ -1,0 +1,732 @@
+---
+title: "Analysis of Stage Shift - Mortality Correlations"
+author: "James Long"
+always_allow_html: yes
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: united
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+---
+
+```{r alternative-preambles,echo=FALSE,include=FALSE,eval=FALSE}
+## if using word replace output with
+output:
+  word_document:
+    toc: yes
+
+## if using pdf replace output with
+output:
+  pdf_document:
+    toc: yes
+header-includes:
+  - \usepackage{xcolor}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+## colorizes text when using html or pdf output
+## just spits out text x for word
+colorize <- function(x, color) {
+  if(color=="todo"){
+    color <- "red"
+    x <- paste0("TODO: ",x)
+  }
+  if (knitr::is_latex_output()) {
+    sprintf("\\textcolor{%s}{%s}", color, x)
+  } else if (knitr::is_html_output()) {
+    sprintf("<span style='color: %s;'>%s</span>", color, 
+      x)
+  } else x
+}
+
+todo <- function(x){
+  paste0("**",colorize(x,"todo"),"**")
+}
+
+
+outf <- "output-02-meta/"
+unlink(outf,recursive=TRUE)
+dir.create(outf,recursive=TRUE)
+
+
+source('funcs.R')
+library(readxl)
+library(ggplot2)
+library(kableExtra)
+library(latex2exp)
+library(DescTools)
+
+## confidence interval alpha
+ALPHA <- 0.1
+```
+
+
+## Outline
+
+* Reproduce and extend on results in [Cancer Stage Compared With Mortality as End Points in Randomized Clinical Trials of Cancer Screening A Systematic Review and Meta-Analysis](https://jamanetwork.com/journals/jama/article-abstract/2817338)
+    * Data available here: https://github.com/hilaryrobbins/cancer_screening_endpoints
+    * Filename: cancer_screening_endpoints_data.xlsx
+
+
+```{r}
+fname <- "data-feng/cancer_screening_endpoints_data.xlsx"
+dat <- read_excel(fname)
+
+
+## clean up intervention names
+dat$Intervention
+temp <- gsub("1. ","",dat$Intervention,fixed=TRUE)
+temp <- gsub("2. ","",temp,fixed=TRUE)
+temp <- gsub("Flexible sigmoidoscopy","Sigmoid.",temp,fixed=TRUE)
+temp <- gsub("with or without a single FOBT","+/- FOBT",temp,fixed=TRUE)
+temp <- gsub("and transvaginal ultrasound","+ TVU",temp,fixed=TRUE)
+dat$Intervention_short <- temp
+
+
+dat$sname <- vapply(strsplit(dat$`Study name`,":",fixed=TRUE),
+                        function(x){x[1]},
+                        c(NA_character_))
+dat$sname <- paste(dat$sname,paste0("(",dat$Intervention_short,")"))
+dat$sname <- as.factor(dat$sname)
+
+
+## compute death reduction
+dat$Death_Prop_Arm1 <- dat$Cancer_deaths_arm1/dat$N_arm1
+dat$Death_Prop_Arm2 <- dat$Cancer_deaths_arm2/dat$N_arm2
+dat$MortalityReduction <- 100*((dat$Death_Prop_Arm1 - dat$Death_Prop_Arm2) / dat$Death_Prop_Arm1)
+
+
+## compute late stage incidence reduction
+dat$LateStage_Prop_Arm1 <- dat$Stage_3_4_arm1/dat$N_arm1
+dat$LateStage_Prop_Arm2 <- dat$Stage_3_4_arm2/dat$N_arm2
+dat$LateStageReduction <- 100*((dat$LateStage_Prop_Arm1 - dat$LateStage_Prop_Arm2) / dat$LateStage_Prop_Arm1)
+
+
+## comparison of death between arms
+ggplot(dat,aes(x=Death_Prop_Arm1,y=Death_Prop_Arm2)) +
+  geom_point() + geom_abline(slope=1,intercept=0)
+
+
+## comparison of late stage incidence between arms
+ggplot(dat,aes(x=LateStage_Prop_Arm1,y=LateStage_Prop_Arm2)) +
+  geom_point() + geom_abline(slope=1,intercept=0)
+
+
+## primary analysis did not include "Alexander et al Br J Can"
+subset(dat,Cancer_type=="Breast cancer")
+```
+
+
+### Figure 1A: Breast
+
+```{r}
+ggplot(subset(dat,Cancer_type=="Breast cancer" & primary_analysis=="yes"),
+       aes(x=LateStageReduction,y=MortalityReduction)) +
+  geom_point() + 
+  geom_vline(xintercept=0,color='red') + 
+  geom_hline(yintercept=0,color='red') +
+  coord_cartesian(xlim=c(-50,75),ylim=c(-50,75))
+```
+
+
+
+### Figure 1B: Colorectal Cancer
+
+```{r}
+table(dat$Cancer_type)
+colnames(dat)
+
+table(dat$primary_analysis)
+
+ggplot(subset(dat,Cancer_type=="Colorectal cancer" & primary_analysis=="yes"),
+       aes(x=LateStageReduction,y=MortalityReduction)) +
+  geom_point() + 
+  geom_vline(xintercept=0,color='red') + 
+  geom_hline(yintercept=0,color='red') +
+  coord_cartesian(xlim=c(-50,75),ylim=c(-50,75))
+
+
+```
+
+
+
+## Plots with Uncertainties 
+
+
+We now make figures with uncertainties. Since we do not know correlation for each study, this will be assumed.
+
+
+
+
+
+
+
+
+### Figure 1 D Ovarian
+
+
+```{r}
+dat_sub <- subset(dat,Cancer_type=="Ovarian cancer" & primary_analysis=="yes")
+```
+
+```{r}
+cols <- scales::hue_pal()(nrow(dat_sub))
+names(cols) <- as.character(dat_sub$sname)
+p1 <- ggplot(dat_sub,aes(x=LateStageReduction,y=MortalityReduction,color=sname)) +
+  geom_point() + 
+  geom_vline(xintercept=0,color='black') + 
+  geom_hline(yintercept=0,color='black') +
+  coord_cartesian(xlim=c(-50,75),ylim=c(-50,75)) +
+  theme(legend.title=element_blank()) +
+  scale_colour_manual(values = cols)  
+print(p1)
+```
+
+
+
+```{r}
+rhos <- c(0.1,0.66,0.9)
+ps <- vector("list",length(rhos))
+ratio_conf <- vector("list",length(rhos))
+els_all <- vector("list",length(rhos))
+jj <- 1
+ii <- 1
+for(jj in 1:length(rhos)){
+  ps[[jj]] <- p1
+  ratio_conf[[jj]] <- data.frame(Study=dat_sub$sname,
+                                 CI=rep(NA_character_,nrow(dat_sub)))
+  dat_sub$rho <- rhos[jj]
+  vname <- c("LateStage_Prop_Arm1","LateStage_Prop_Arm2",
+             "Death_Prop_Arm1","Death_Prop_Arm2","rho")
+  els <- list()
+  for(ii in 1:nrow(dat_sub)){
+    print(ii)
+    pp <- as.numeric(dat_sub[ii,vname])
+    cent <- (c(dat_sub$LateStageReduction[ii],dat_sub$MortalityReduction[ii]))/100
+    n <- dat_sub$N_arm1[ii]
+    m <- dat_sub$N_arm2[ii]
+    els[[ii]] <- cbind(100*CreateEllipse(pp,cent,n,m,alpha=ALPHA,marginal=TRUE),
+                       sname=dat_sub$sname[ii],rho=paste0("rho=",rhos[jj]))
+    gCov <- ConstructCovSMMargin(pp,n,m)
+    temp <- gCov[1,1]
+    gCov[1,1] <- gCov[2,2]
+    gCov[2,2] <- temp
+    ratio_conf[[jj]][ii,2] <- FiellerCI(cent[2],cent[1],gCov,alpha=ALPHA)$latex
+    ##FiellerCI(cent[2],cent[1],gCov,alpha=ALPHA)$latex
+  }
+  els_all[[jj]] <- do.call(rbind,els)
+}
+els_all <- do.call(rbind,els_all)
+ratio_conf
+```
+
+
+
+
+```{r}
+
+dat_sub_rep <- do.call(rbind,replicate(length(rhos),dat_sub,simplify=FALSE))
+dat_sub_rep$rho <- paste0("rho=",rep(rhos,each=nrow(dat_sub)))
+
+
+cols <- scales::hue_pal()(nrow(dat_sub))
+names(cols) <- as.character(dat_sub$sname)
+
+dat_sub_rep$rho <- factor(dat_sub_rep$rho)
+dat_sub_rep$rho
+levels(dat_sub_rep$rho) <- c("rho=0.1"=TeX("$\\rho=0.1$"),"rho=0.66"=TeX("$\\rho=0.66$"),"rho=0.9"=TeX("$\\rho=0.9$"))
+dat_sub_rep$rho
+els_all$rho <- factor(els_all$rho)
+levels(els_all$rho) <- c("rho=0.1"=TeX("$\\rho=0.1$"),"rho=0.66"=TeX("$\\rho=0.66$"),"rho=0.9"=TeX("$\\rho=0.9$"))
+
+p1 <- ggplot(dat_sub_rep,aes(x=LateStageReduction,y=MortalityReduction,color=sname)) +
+  geom_point() + 
+  geom_vline(xintercept=0,color='black') + 
+  geom_hline(yintercept=0,color='black') +
+  coord_cartesian(xlim=c(-50,75),ylim=c(-50,75)) +
+  theme(legend.title=element_blank()) +
+  scale_colour_manual(values = cols)  +
+  facet_grid(cols=vars(rho),labeller=label_parsed) +
+  geom_path(data=els_all,mapping=aes(x=x,y=y,color=sname)) +
+  xlab("Estimated Late-Stage Incidence Reduction") +
+  ylab("Estimated Mortality Reduction") +
+  theme_bw() +
+  theme(legend.title=element_blank())
+print(p1)
+ggsave(paste0(outf,"ovarian_ellipses.pdf"),width=10,height=2.75)
+```
+
+
+
+
+```{r}
+temp <- data.frame(ratio_conf[[1]][,1],
+                   paste0(dat_sub$N_arm1,"/",dat_sub$N_arm2),
+                   dat_sub$`Follow-up, years`,                   
+                   round(dat_sub$LateStageReduction),
+                   round(dat_sub$MortalityReduction))
+
+colnames(temp) <- c("Study","n (Arm 1/Arm2)","Follow-up (yr)",
+                    "$\\widehat{S}$","$\\widehat{M}$")
+
+
+#colnames(temp) <- c("Study","n (Arm 1/Arm2)","Follow-up (yr)",paste0("$\\rho=",rhos,"$"))
+temp
+
+caption <- "Ovarian Screening trials.  \\label{tab:ovarian_rj}"
+tab <- kbl(temp,booktabs=TRUE,format="latex",escape=FALSE,caption=caption)
+tab
+
+
+```
+
+
+
+```{r}
+save_kable(tab,file=paste0(outf,"ovarian.tex"))
+```
+
+
+
+
+
+### Figure 1 B: Colorectal Cancer
+
+
+
+
+```{r}
+dat_sub <- subset(dat,Cancer_type=="Colorectal cancer" & primary_analysis=="yes")
+```
+
+```{r}
+cols <- scales::hue_pal()(nrow(dat_sub))
+names(cols) <- as.character(dat_sub$sname)
+p1 <- ggplot(dat_sub,aes(x=LateStageReduction,y=MortalityReduction,color=sname)) +
+  geom_point() + 
+  geom_vline(xintercept=0,color='black') + 
+  geom_hline(yintercept=0,color='black') +
+  coord_cartesian(xlim=c(-50,75),ylim=c(-50,75)) +
+  theme(legend.title=element_blank()) +
+  scale_colour_manual(values = cols)  
+print(p1)
+```
+
+
+
+
+```{r}
+rhos <- c(0.1,0.66,0.9)
+ps <- vector("list",length(rhos))
+ratio_conf <- vector("list",length(rhos))
+els_all <- vector("list",length(rhos))
+gCovs <- vector("list",length(rhos))
+hl <- NULL ## store trials which are sig diff from 0
+for(jj in 1:length(rhos)){
+  ps[[jj]] <- p1
+  gCovs[[jj]] <- vector("list",nrow(dat_sub))  
+  ratio_conf[[jj]] <- data.frame(Study=dat_sub$sname,
+                                 CI=rep(NA_character_,nrow(dat_sub)))
+  dat_sub$rho <- rhos[jj]
+  vname <- c("LateStage_Prop_Arm1","LateStage_Prop_Arm2",
+             "Death_Prop_Arm1","Death_Prop_Arm2","rho")
+  els <- list()
+  for(ii in 1:nrow(dat_sub)){
+    print(ii)
+    pp <- as.numeric(dat_sub[ii,vname])
+    cent <- (c(dat_sub$LateStageReduction[ii],dat_sub$MortalityReduction[ii]))/100
+    n <- dat_sub$N_arm1[ii]
+    m <- dat_sub$N_arm2[ii]
+    el <- 100*CreateEllipse(pp,cent,n,m,alpha=ALPHA,marginal=TRUE)
+    if((min(el[,1]) > 0 | max(el[,1]) < 0) & (min(el[,2]) > 0 | max(el[,2]) < 0)){
+      hl <- c(hl,as.character(dat_sub$sname[ii]))
+    }
+    els[[ii]] <- cbind(el,
+                       sname=dat_sub$sname[ii],rho=paste0("rho=",rhos[jj]))
+    gCovs[[jj]][[ii]] <- ConstructCovSMMargin(pp,n,m)
+    gCov <- gCovs[[jj]][[ii]]
+    ## reverse order of S and M variances
+    temp <- gCov[1,1]
+    gCov[1,1] <- gCov[2,2]
+    gCov[2,2] <- temp
+    ratio_conf[[jj]][ii,2:3] <- FiellerCI(cent[2],cent[1],gCov,alpha=ALPHA)$latex
+  }
+  els_all[[jj]] <- do.call(rbind,els)
+}
+els_all <- do.call(rbind,els_all)
+ratio_conf
+```
+
+
+
+```{r}
+unique(hl)
+```
+
+
+
+
+```{r}
+length(els_all)
+names(els_all)
+
+#BB <- c("MCCCS (Annual FOBT)","PLCO (Sigmoid.)","FOBSFCS (FOBT)","NCCST (FOBT)")
+BB <- hl
+dat_sub$alpha <- 0.5
+dat_sub$alpha[dat_sub$sname %in% BB] <- 1
+```
+
+
+
+
+```{r}
+
+dat_sub_rep <- do.call(rbind,replicate(length(rhos),dat_sub,simplify=FALSE))
+dat_sub_rep$rho <- paste0("rho=",rep(rhos,each=nrow(dat_sub)))
+
+
+cols <- scales::hue_pal()(nrow(dat_sub))
+names(cols) <- as.character(dat_sub$sname)
+
+dat_sub_rep$rho <- factor(dat_sub_rep$rho)
+dat_sub_rep$rho
+levels(dat_sub_rep$rho) <- c("rho=0.1"=TeX("$\\rho=0.1$"),"rho=0.66"=TeX("$\\rho=0.66$"),"rho=0.9"=TeX("$\\rho=0.9$"))
+dat_sub_rep$rho
+els_all$rho <- factor(els_all$rho)
+levels(els_all$rho) <- c("rho=0.1"=TeX("$\\rho=0.1$"),"rho=0.66"=TeX("$\\rho=0.66$"),"rho=0.9"=TeX("$\\rho=0.9$"))
+
+
+els_all$alpha <- 0.3
+els_all$alpha[els_all$sname %in% BB] <- 1
+
+
+temp <- els_all[,c("sname","alpha")]
+temp <- temp[!duplicated(temp),]
+leg_alpha <- temp[order(as.character(temp[,1,drop=TRUE])),]$alpha
+
+p1 <- ggplot(dat_sub_rep,aes(x=LateStageReduction,y=MortalityReduction,color=sname)) +
+  geom_point(aes(alpha=alpha)) +
+  geom_vline(xintercept=0,color='black') + 
+  geom_hline(yintercept=0,color='black') +
+  coord_cartesian(xlim=c(-50,75),ylim=c(-50,75)) +
+  theme(legend.title=element_blank()) +
+  scale_colour_manual(values = cols)  +
+  facet_grid(cols=vars(rho),labeller=label_parsed) +
+  geom_path(data=els_all,mapping=aes(x=x,y=y,color=sname,alpha=alpha)) +
+  xlab("Estimated Late-Stage Incidence Reduction") +
+  ylab("Estimated Mortality Reduction") +
+  theme_bw() +
+  theme(legend.title=element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  guides(colour = guide_legend(override.aes = list(alpha=leg_alpha)),alpha="none")
+print(p1)
+ggsave(paste0(outf,"colorectal_ellipses.pdf"),width=10,height=2.75)
+```
+
+
+
+
+```{r}
+temp <- list()
+for(ii in 1:length(ratio_conf)){
+  temp[[ii]] <- ratio_conf[[ii]][,2]
+}
+temp <- as.data.frame(temp)
+
+temp <- data.frame(ratio_conf[[1]][,1],
+                   paste0(dat_sub$N_arm1,"/",dat_sub$N_arm2),
+                   dat_sub$`Follow-up, years`,                   
+                   round(dat_sub$LateStageReduction),
+                   round(dat_sub$MortalityReduction),
+                   round(dat_sub$MortalityReduction/dat_sub$LateStageReduction,1),
+                   temp)
+
+colnames(temp) <- c("Study","n (Arm 1/Arm2)","Follow-up (yr)",
+                    "$\\widehat{S}$","$\\widehat{M}$","$\\widehat{r}$",paste0("$\\rho=",rhos,"$"))
+#temp
+#colnames(temp) <- c("Study","n (Arm 1/Arm2)","Follow-up (yr)",paste0("$\\rho=",rhos,"$"))
+temp
+
+caption <- "Colorectal Screening trials.  \\label{tab:ovarian_rj}"
+header <- data.frame(c(" ",paste0(100*(1-ALPHA),"% CI for r")),
+                     c(6,3))
+tab <- kbl(temp,booktabs=TRUE,format="latex",escape=FALSE,caption=caption) %>%
+    add_header_above(header)
+tab
+```
+
+
+```{r}
+save_kable(tab,file=paste0(outf,"colorectal_rj.tex"))
+```
+
+
+
+
+
+
+
+#### Check Some Results
+
+```{r}
+dat_sub
+dat_sub[dat_sub$sname=="NCCST (FOBT)",
+        c("sname","N_arm1","N_arm2","Cancer_deaths_arm1","Cancer_deaths_arm2")]
+
+ix <- dat_sub$sname=="NCCST (FOBT)"
+narm1 <- dat_sub[ix,"N_arm1",drop=TRUE]
+narm2 <- dat_sub[ix,"N_arm2",drop=TRUE]
+darm1 <- dat_sub[ix,"Cancer_deaths_arm1",drop=TRUE]
+darm2 <- dat_sub[ix,"Cancer_deaths_arm2",drop=TRUE]
+
+
+dd <- matrix(c(narm1-darm1,darm1,narm2-darm2,darm2),byrow=TRUE,nrow=2)
+fisher.test(x=dd)
+
+dd <- matrix(c(darm2,darm1,narm2-darm2,narm1-darm1),nrow=2)
+dd
+RelRisk(dd,conf.level=0.95)
+```
+
+
+```{r}
+ix <- which(dat_sub$sname=="NCCST (FOBT)")
+ix
+
+
+pest <- (darm1/narm1 - darm2/narm2)/(darm1/narm1)
+
+varM <- gCovs[[1]][[ix]][2,2]
+varM
+gCovs[[2]][[ix]]
+
+pest
+1-c(pest + 2*sqrt(varM),pest - 2*sqrt(varM))
+
+```
+
+
+
+
+```{r}
+BB <- c("NCCST (FOBT)")
+els_all$alpha <- 0.2
+els_all$alpha[els_all$sname %in% BB] <- 1
+
+dat_sub_rep$alpha <- 0.2
+dat_sub_rep$alpha[dat_sub_rep$sname %in% BB] <- 1
+
+temp <- dat_sub_rep[,c("sname","alpha")]
+temp <- temp[!duplicated(temp),]
+leg_alpha <- temp[order(as.character(temp[,1,drop=TRUE])),]$alpha
+
+p1 <- ggplot(dat_sub_rep,aes(x=LateStageReduction,y=MortalityReduction,color=sname)) +
+  geom_point(aes(alpha=alpha)) +
+  geom_vline(xintercept=0,color='black') + 
+  geom_hline(yintercept=0,color='black') +
+  coord_cartesian(xlim=c(-50,75),ylim=c(-50,75)) +
+  theme(legend.title=element_blank()) +
+  scale_colour_manual(values = cols)  +
+  facet_grid(cols=vars(rho),labeller=label_parsed) +
+  geom_path(data=els_all,mapping=aes(x=x,y=y,color=sname,alpha=alpha)) +
+  xlab("Estimated Late-Stage Incidence Reduction") +
+  ylab("Estimated Mortality Reduction") +
+  theme_bw() +
+  theme(legend.title=element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  guides(colour = guide_legend(override.aes = list(alpha=leg_alpha)),alpha="none")
+print(p1)
+ggsave(paste0(outf,"colorectal_ellipses_nccst.pdf"),width=10,height=2.75)
+```
+
+
+
+
+PLCO colorectal and MCCCS (Annual FOBT) colorectal provide most informative results.
+
+
+
+
+### Figure 1 C: Lung Cancer
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+table(dat$Cancer_type)
+dat_sub <- subset(dat,Cancer_type=="Lung cancer" & primary_analysis=="yes")
+dim(dat_sub)
+```
+
+```{r}
+cols <- scales::hue_pal()(nrow(dat_sub))
+names(cols) <- as.character(dat_sub$sname)
+p1 <- ggplot(dat_sub,aes(x=LateStageReduction,y=MortalityReduction,color=sname)) +
+  geom_point() + 
+  geom_vline(xintercept=0,color='black') + 
+  geom_hline(yintercept=0,color='black') +
+  coord_cartesian(xlim=c(-50,75),ylim=c(-50,75)) +
+  theme(legend.title=element_blank()) +
+  scale_colour_manual(values = cols)  
+print(p1)
+```
+
+
+
+
+```{r}
+rhos <- c(0.1,0.66,0.9)
+ps <- vector("list",length(rhos))
+ratio_conf <- vector("list",length(rhos))
+els_all <- vector("list",length(rhos))
+gCovs <- vector("list",length(rhos))
+hl <- NULL ## store trials which are sig diff from 0
+for(jj in 1:length(rhos)){
+  ps[[jj]] <- p1
+  gCovs[[jj]] <- vector("list",nrow(dat_sub))  
+  ratio_conf[[jj]] <- data.frame(Study=dat_sub$sname,
+                                 CI=rep(NA_character_,nrow(dat_sub)))
+  dat_sub$rho <- rhos[jj]
+  vname <- c("LateStage_Prop_Arm1","LateStage_Prop_Arm2",
+             "Death_Prop_Arm1","Death_Prop_Arm2","rho")
+  els <- list()
+  for(ii in 1:nrow(dat_sub)){
+    print(ii)
+    pp <- as.numeric(dat_sub[ii,vname])
+    cent <- (c(dat_sub$LateStageReduction[ii],dat_sub$MortalityReduction[ii]))/100
+    n <- dat_sub$N_arm1[ii]
+    m <- dat_sub$N_arm2[ii]
+    el <- 100*CreateEllipse(pp,cent,n,m,alpha=ALPHA,marginal=TRUE)
+    if((min(el[,1]) > 0 | max(el[,1]) < 0) & (min(el[,2]) > 0 | max(el[,2]) < 0)){
+      hl <- c(hl,as.character(dat_sub$sname[ii]))
+    }
+    els[[ii]] <- cbind(el,
+                       sname=dat_sub$sname[ii],rho=paste0("rho=",rhos[jj]))
+    gCovs[[jj]][[ii]] <- ConstructCovSMMargin(pp,n,m)
+    gCov <- gCovs[[jj]][[ii]]
+    ## reverse order of S and M variances
+    temp <- gCov[1,1]
+    gCov[1,1] <- gCov[2,2]
+    gCov[2,2] <- temp
+    ratio_conf[[jj]][ii,2:3] <- FiellerCI(cent[2],cent[1],gCov,alpha=ALPHA)$latex
+  }
+  els_all[[jj]] <- do.call(rbind,els)
+}
+els_all <- do.call(rbind,els_all)
+ratio_conf
+```
+
+
+
+
+```{r}
+length(els_all)
+names(els_all)
+
+
+#BB <- c("MCCCS (Annual FOBT)","PLCO (Sigmoid.)","FOBSFCS (FOBT)","NCCST (FOBT)")
+BB <- hl
+dat_sub$alpha <- 0.5
+dat_sub$alpha[dat_sub$sname %in% BB] <- 1
+```
+
+
+
+
+```{r}
+
+dat_sub_rep <- do.call(rbind,replicate(length(rhos),dat_sub,simplify=FALSE))
+dat_sub_rep$rho <- paste0("rho=",rep(rhos,each=nrow(dat_sub)))
+
+
+cols <- scales::hue_pal()(nrow(dat_sub))
+names(cols) <- as.character(dat_sub$sname)
+
+dat_sub_rep$rho <- factor(dat_sub_rep$rho)
+dat_sub_rep$rho
+levels(dat_sub_rep$rho) <- c("rho=0.1"=TeX("$\\rho=0.1$"),"rho=0.66"=TeX("$\\rho=0.66$"),"rho=0.9"=TeX("$\\rho=0.9$"))
+dat_sub_rep$rho
+els_all$rho <- factor(els_all$rho)
+levels(els_all$rho) <- c("rho=0.1"=TeX("$\\rho=0.1$"),"rho=0.66"=TeX("$\\rho=0.66$"),"rho=0.9"=TeX("$\\rho=0.9$"))
+
+
+els_all$alpha <- 0.3
+els_all$alpha[els_all$sname %in% BB] <- 1
+
+
+temp <- els_all[,c("sname","alpha")]
+temp <- temp[!duplicated(temp),]
+leg_alpha <- temp[order(as.character(temp[,1,drop=TRUE])),]$alpha
+
+p1 <- ggplot(dat_sub_rep,aes(x=LateStageReduction,y=MortalityReduction,color=sname)) +
+  geom_point(aes(alpha=alpha)) +
+  geom_vline(xintercept=0,color='black') + 
+  geom_hline(yintercept=0,color='black') +
+  coord_cartesian(xlim=c(-50,75),ylim=c(-50,75)) +
+  theme(legend.title=element_blank()) +
+  scale_colour_manual(values = cols)  +
+  facet_grid(cols=vars(rho),labeller=label_parsed) +
+  geom_path(data=els_all,mapping=aes(x=x,y=y,color=sname,alpha=alpha)) +
+  xlab("Estimated Late-Stage Incidence Reduction") +
+  ylab("Estimated Mortality Reduction") +
+  theme_bw() +
+  theme(legend.title=element_blank(),panel.grid.major = element_blank(), panel.grid.minor = element_blank()) +
+  guides(colour = guide_legend(override.aes = list(alpha=leg_alpha)),alpha="none")
+print(p1)
+ggsave(paste0(outf,"lung_ellipses.pdf"),width=10,height=2.75)
+```
+
+
+
+
+```{r}
+temp <- list()
+for(ii in 1:length(ratio_conf)){
+  temp[[ii]] <- ratio_conf[[ii]][,2]
+}
+temp <- as.data.frame(temp)
+
+temp <- data.frame(ratio_conf[[1]][,1],
+                   paste0(dat_sub$N_arm1,"/",dat_sub$N_arm2),
+                   dat_sub$`Follow-up, years`,                   
+                   round(dat_sub$LateStageReduction),
+                   round(dat_sub$MortalityReduction),
+                   round(dat_sub$MortalityReduction/dat_sub$LateStageReduction,1),
+                   temp)
+
+colnames(temp) <- c("Study","n (Arm 1/Arm2)","Follow-up (yr)",
+                    "$\\widehat{S}$","$\\widehat{M}$","$\\widehat{r}$",
+                    paste0("$\\rho=",rhos,"$"))
+#temp
+#colnames(temp) <- c("Study","n (Arm 1/Arm2)","Follow-up (yr)",paste0("$\\rho=",rhos,"$"))
+temp
+
+caption <- "Colorectal Screening trials.  \\label{tab:ovarian_rj}"
+header <- data.frame(c(" ",paste0(100*(1-ALPHA),"% CI for r")),
+                     c(6,3))
+tab <- kbl(temp,booktabs=TRUE,format="latex",escape=FALSE,caption=caption) %>%
+    add_header_above(header)
+tab
+```
+
+
+```{r}
+save_kable(tab,file=paste0(outf,"lung_rj.tex"))
+```
+
+
+
+
+
+
+
+

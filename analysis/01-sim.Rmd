@@ -1,0 +1,925 @@
+---
+title: "Simulations Correlating Stage Shift with Mortality"
+author: "James Long"
+always_allow_html: yes
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    theme: united
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+---
+
+```{r alternative-preambles,echo=FALSE,include=FALSE,eval=FALSE}
+## if using word replace output with
+output:
+  word_document:
+    toc: yes
+
+## if using pdf replace output with
+output:
+  pdf_document:
+    toc: yes
+header-includes:
+  - \usepackage{xcolor}
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(knitr.kable.NA = '')
+
+## colorizes text when using html or pdf output
+## just spits out text x for word
+colorize <- function(x, color) {
+  if(color=="todo"){
+    color <- "red"
+    x <- paste0("TODO: ",x)
+  }
+  if (knitr::is_latex_output()) {
+    sprintf("\\textcolor{%s}{%s}", color, x)
+  } else if (knitr::is_html_output()) {
+    sprintf("<span style='color: %s;'>%s</span>", color, 
+      x)
+  } else x
+}
+
+todo <- function(x){
+  paste0("**",colorize(x,"todo"),"**")
+}
+
+
+source('funcs.R')
+
+outf <- "output-01-sim/"
+unlink(outf,recursive=TRUE)
+dir.create(outf,recursive=TRUE)
+
+
+library(ggplot2)
+library(ggpubr)
+library(kableExtra)
+library(latex2exp)
+library(ggrepel)
+set.seed(1234)
+```
+
+
+
+```{r}
+n <- 20000
+m <- 20000
+Nsim <- 100
+ntrial <- 10
+NN <- Nsim*ntrial
+
+## formats probabilities from vector to matrix
+## p = (prob early stage and alive,prob early stage and death,
+##      prob late stage and alive, prob late stage and death)
+##
+## returns. matrix with probabilities of 6 events
+## 2 rows (alive/dead)
+## 3 columns (no diag, early, late)
+## 
+## note that input argument p does not specify prob no cancer
+## it is assumed that prob no cancer and death = 0 so that
+## prob no cancer and alive is 1-sum(p)
+##
+## probabilities are put in range 10^-20 to 1 to avoid numerical issues
+## if using optimizers
+FormatP <- function(p){
+  p <- matrix(c(1-sum(p),0,p),nrow=2)
+  p <- pmin(pmax(p,0),1)
+  return(p / sum(p))
+}
+
+
+
+## mortality reduction
+MortRed <- function(C,S){
+  mortC <- sum(C[C$Var1==1,3])/sum(C[,3])
+  mortS <- sum(S[S$Var1==1,3])/sum(S[,3])
+  MM <- (mortC-mortS)/mortC
+  return(MM)
+}
+
+## late stage reduction
+StageRed <- function(C,S){
+  screenC <- sum(C[C$Var2==2,3])/sum(C[,3])
+  screenS <- sum(S[S$Var2==2,3])/sum(S[,3])
+  SS <- (screenC-screenS)/screenC
+  return(SS)
+}
+
+```
+
+
+```{r}
+## probabilities in control arm
+pCtrue_vec <- c(0.009,0.001,0.005,0.015)
+
+## choose shifts for screen
+del <- 0.0025
+r1s <- c(0,0,del,0)
+r2s <- c(0,del,0,0)
+r3s <- c(0,0,0,del)
+r4s <- c(0,-del,-del,-del)
+
+```
+
+
+
+```{r}
+figwidth <- 4.1
+figheight <- 3.9
+```
+
+
+
+## No Stage Shift and No Mortality Benefit
+
+
+
+
+
+```{r}
+## parameters for control arm
+pC <- FormatP(pCtrue_vec)
+rownames(pC) <- 0:1
+colnames(pC) <- 0:2
+pC
+pC_tab <- pC
+sum(pC)
+pC <- as.data.frame(as.table(pC))
+pC
+
+## parameters for screen arm
+pStrue_vec <- pCtrue_vec
+pS <- FormatP(pStrue_vec)
+rownames(pS) <- 0:1
+colnames(pS) <- 0:2
+pS
+pS_tab <- pS
+sum(pS)
+pS <- as.data.frame(as.table(pS))
+
+
+
+
+
+
+
+Mtrue <- MortRed(pC,pS)
+Mtrue
+
+Strue <- StageRed(pC,pS)
+Strue
+
+# res <- data.frame(Trial1=rep(NA_real_,N),Trial2=rep(NA_real_,N),
+#                   Ratio=rep(NA_real_,N),Diff=rep(NA_real_,N),
+#                   MLE=rep(NA_real_,N))
+stage_mort <- data.frame(MortRed=rep(NA_real_,NN),
+                         StageRed=rep(NA_real_,NN))
+
+
+## stores probabilities
+##
+## in control
+## pC21 = prob. no cancer/early stage AND dead
+## pC12 = prob. late stage AND alive
+## pC22 = prob. late stage AND dead
+## 
+## pSXY is same but in screen population
+res <- data.frame(pC21=rep(NA_real_,NN),
+                  pC12=rep(NA_real_,NN),
+                  pC22=rep(NA_real_,NN),
+                  pS21=rep(NA_real_,NN),
+                  pS12=rep(NA_real_,NN),
+                  pS22=rep(NA_real_,NN))
+                  
+
+
+
+
+for(ii in 1:NN){
+  CC <- cbind(pC[,1:2],n=rmultinom(n=1,size=n,prob=pC$Freq))
+  SS <- cbind(pS[,1:2],n=rmultinom(n=1,size=m,prob=pS$Freq))
+  stage_mort[ii,1] <- MortRed(CC,SS)
+  stage_mort[ii,2] <- StageRed(CC,SS)
+  ## control  
+  res[ii,1] <- CC[CC$Var1==1 & CC$Var2==1,3] / sum(CC$n)
+  res[ii,2] <- CC[CC$Var1==0 & CC$Var2==2,3] / sum(CC$n)
+  res[ii,3] <- CC[CC$Var1==1 & CC$Var2==2,3] / sum(CC$n)
+  ## screen
+  res[ii,4] <- SS[SS$Var1==1 & SS$Var2==1,3] / sum(SS$n)
+  res[ii,5] <- SS[SS$Var1==0 & SS$Var2==2,3] / sum(SS$n)
+  res[ii,6] <- SS[SS$Var1==1 & SS$Var2==2,3] / sum(SS$n)
+  
+}
+```
+
+
+
+```{r}
+head(stage_mort)
+p <- ggplot(stage_mort[1:ntrial,],aes(x=StageRed,y=MortRed)) +
+  geom_point() + geom_smooth(method="lm") +
+  stat_cor(p.accuracy = 0.001, r.accuracy = 0.01,color="red",
+               label.x.npc = 0.3,
+               label.y.npc = 0.04,size=3.5) +
+  ylab(TeX("Estimated Mortality Reduction ($\\widehat{M}$)")) +
+  xlab(TeX("Estimated Late-Stage Incidence Reduction ($\\widehat{S}$)")) +
+  geom_vline(xintercept=0,color='black') + 
+  geom_hline(yintercept=0,color='black') +
+  theme_bw()
+print(p)
+
+
+# y-range
+ylims <- layer_scales(p)$y$range$range
+# x-range
+xlims <- layer_scales(p)$x$range$range
+
+ggsave(paste0(outf,"null-scatter-est.pdf"),width=figwidth,height=figheight)
+```
+
+
+
+
+
+
+
+```{r}
+## plot all trials
+head(stage_mort)
+p <- ggplot(stage_mort, aes(x = StageRed, y = MortRed)) +
+  geom_point() + geom_smooth(method = "lm") +
+  stat_cor(
+    aes(label = ..r.label..),
+    r.accuracy = 0.01,
+    color = "red",
+    label.x = 0.1,
+    label.y = -0.2,
+    size = 4.5
+  ) +
+  ylab(TeX("Estimated Mortality Reduction ($\\widehat{M}$)")) +
+  xlab(TeX("Estimated Late-Stage Incidence Reduction ($\\widehat{S}$)")) +
+  geom_vline(xintercept = 0, color = 'black') +
+  geom_hline(yintercept = 0, color = 'black') +
+  geom_point(aes(x=Strue,y=Mtrue),col='red',shape=4,size=3,stroke=2) +
+  theme_bw()
+
+
+# y-range
+ylims <- layer_scales(p)$y$range$range
+# x-range
+xlims <- layer_scales(p)$x$range$range
+
+
+
+
+
+a <- lm(MortRed~StageRed,data=stage_mort)
+
+
+p <- ggplot(stage_mort, aes(x = StageRed, y = MortRed)) +
+  geom_point() + geom_smooth(method = "lm",se=FALSE) +
+  ylab(TeX("Estimated Mortality Reduction ($\\widehat{M}$)")) +
+  xlab(TeX("Estimated Late-Stage Incidence Reduction ($\\widehat{S}$)")) +
+  geom_vline(xintercept = 0, color = 'black') +
+  geom_hline(yintercept = 0, color = 'black') +
+  geom_point(aes(x=Strue,y=Mtrue),col='red',shape=4,size=3,stroke=2) +
+  theme_bw()
+p <- p + geom_text(  x = 0.1,  # Adjust x and y coordinates as needed
+    y = -0.2,
+    label = TeX(paste0("$\\widehat{\\beta}_1$ = ",round(a$coefficients[2],2))),
+    color = "red")
+ylims <- layer_scales(p)$y$range$range
+# x-range
+xlims <- layer_scales(p)$x$range$range
+
+
+
+
+print(p)
+
+
+
+ggsave(paste0(outf,"null-scatter-est-all.pdf"),width=figwidth,height=figheight)
+```
+
+
+
+
+```{r}
+stage_mort_true <- data.frame(StageRed=rep(0,ntrial),MortRed=rep(0,ntrial))
+p <- ggplot(stage_mort_true,aes(x=StageRed,y=MortRed)) +
+  geom_point() +
+  ylab(TeX("Mortality Reduction ($M$)")) +
+  xlab(TeX("Late-Stage Incidence Reduction ($S$)")) +
+  theme_bw() +
+  xlim(xlims) + ylim(ylims) +
+  geom_vline(xintercept=0,color='black') + 
+  geom_hline(yintercept=0,color='black')
+print(p)
+ggsave(paste0(outf,"null-scatter-true.pdf"),width=figwidth,height=figheight)
+```
+
+
+
+
+
+```{r}
+## determine how often significant
+ps <- rep(NA_real_,floor(NN/ntrial))
+beta1 <- rep(NA_real_,floor(NN/ntrial))
+for(ii in 1:length(ps)){
+  ix <- (ii-1)*ntrial+1
+  stage_mort_sub <- stage_mort[ix:(ix+ntrial-1),]
+  fit <- lm(MortRed~StageRed,data=stage_mort_sub)
+  beta1[ii] <- fit$coefficients[2]
+  ps[ii] <- summary(fit)$coefficients[2,4]
+}
+null_type1 <- mean(ps < 0.05)
+null_type1
+null_meanbeta1 <- mean(beta1)
+null_meanbeta1
+```
+
+
+
+
+
+## Stage Shift and No Mortality Benefit
+
+
+
+```{r}
+
+
+## parameters for control arm
+pC <- FormatP(pCtrue_vec)
+rownames(pC) <- 0:1
+colnames(pC) <- 0:2
+pC
+pC_tab <- pC
+sum(pC)
+pC <- as.data.frame(as.table(pC))
+pC
+
+## parameters for screen arm
+pStrue_vec <- pCtrue_vec + c(r1s[2],r2s[2],r3s[2],r4s[2])
+pStrue_vec
+pS <- FormatP(pStrue_vec)
+rownames(pS) <- 0:1
+colnames(pS) <- 0:2
+pS
+pS_tab <- pS
+sum(pS)
+pS <- as.data.frame(as.table(pS))
+
+
+
+
+
+
+
+Mtrue <- MortRed(pC,pS)
+Mtrue
+
+Strue <- StageRed(pC,pS)
+Strue
+
+# res <- data.frame(Trial1=rep(NA_real_,N),Trial2=rep(NA_real_,N),
+#                   Ratio=rep(NA_real_,N),Diff=rep(NA_real_,N),
+#                   MLE=rep(NA_real_,N))
+stage_mort <- data.frame(MortRed=rep(NA_real_,NN),
+                         StageRed=rep(NA_real_,NN))
+
+
+## stores probabilities
+##
+## in control
+## pC21 = prob. no cancer/early stage AND dead
+## pC12 = prob. late stage AND alive
+## pC22 = prob. late stage AND dead
+## 
+## pSXY is same but in screen population
+res <- data.frame(pC21=rep(NA_real_,NN),
+                  pC12=rep(NA_real_,NN),
+                  pC22=rep(NA_real_,NN),
+                  pS21=rep(NA_real_,NN),
+                  pS12=rep(NA_real_,NN),
+                  pS22=rep(NA_real_,NN))
+                  
+
+
+
+
+for(ii in 1:NN){
+  CC <- cbind(pC[,1:2],n=rmultinom(n=1,size=n,prob=pC$Freq))
+  SS <- cbind(pS[,1:2],n=rmultinom(n=1,size=m,prob=pS$Freq))
+  stage_mort[ii,1] <- MortRed(CC,SS)
+  stage_mort[ii,2] <- StageRed(CC,SS)
+  ## control  
+  res[ii,1] <- CC[CC$Var1==1 & CC$Var2==1,3] / sum(CC$n)
+  res[ii,2] <- CC[CC$Var1==0 & CC$Var2==2,3] / sum(CC$n)
+  res[ii,3] <- CC[CC$Var1==1 & CC$Var2==2,3] / sum(CC$n)
+  ## screen
+  res[ii,4] <- SS[SS$Var1==1 & SS$Var2==1,3] / sum(SS$n)
+  res[ii,5] <- SS[SS$Var1==0 & SS$Var2==2,3] / sum(SS$n)
+  res[ii,6] <- SS[SS$Var1==1 & SS$Var2==2,3] / sum(SS$n)
+  
+}
+```
+
+
+
+
+```{r}
+head(stage_mort)
+p <- ggplot(stage_mort[1:ntrial,],aes(x=StageRed,y=MortRed)) +
+  geom_point() + geom_smooth(method="lm") +
+  stat_cor(p.accuracy = 0.001, r.accuracy = 0.01,color="red",
+               label.x.npc = 0.3,
+               label.y.npc = 0.04,size=3.5) +
+  ylab(TeX("Estimated Mortality Reduction ($\\widehat{M}$)")) +
+  xlab(TeX("Estimated Late-Stage Incidence Reduction ($\\widehat{S}$)")) +
+  geom_vline(xintercept=0,color='black') + 
+  geom_hline(yintercept=0,color='black') +
+  theme_bw()
+print(p)
+
+
+# y-range
+ylims <- layer_scales(p)$y$range$range
+# x-range
+xlims <- layer_scales(p)$x$range$range
+
+ggsave(paste0(outf,"stage-shift-scatter-est.pdf"),width=figwidth,height=figheight)
+```
+
+
+
+
+
+
+
+```{r}
+## plot all trials
+
+
+a <- lm(MortRed~StageRed,data=stage_mort)
+
+p <- ggplot(stage_mort, aes(x = StageRed, y = MortRed)) +
+  geom_point() + geom_smooth(method = "lm",se=FALSE) +
+  ylab(TeX("Estimated Mortality Reduction ($\\widehat{M}$)")) +
+  xlab(TeX("Estimated Late-Stage Incidence Reduction ($\\widehat{S}$)")) +
+  geom_vline(xintercept = 0, color = 'black') +
+  geom_hline(yintercept = 0, color = 'black') +
+  geom_point(aes(x=Strue,y=Mtrue),col='red',shape=4,size=3,stroke=2) +  
+  theme_bw()
+
+p <- p + geom_text(  x = 0.2,  # Adjust x and y coordinates as needed
+    y = -0.2,
+    label = TeX(paste0("$\\widehat{\\beta}_1$ = ",round(a$coefficients[2],2))),
+    color = "red")
+
+
+# y-range
+ylims <- layer_scales(p)$y$range$range
+# x-range
+xlims <- layer_scales(p)$x$range$range
+
+
+print(p)
+
+
+
+ggsave(paste0(outf,"stage-shift-scatter-est-all.pdf"),width=figwidth,height=figheight)
+```
+
+
+
+
+```{r}
+
+
+stage_mort_true <- data.frame(StageRed=rep(Strue,ntrial),MortRed=rep(Mtrue,ntrial))
+p <- ggplot(stage_mort_true,aes(x=StageRed,y=MortRed)) +
+  geom_point() +
+  ylab(TeX("Mortality Reduction ($M$)")) +
+  xlab(TeX("Late-Stage Incidence Reduction ($S$)")) +
+  theme_bw() +
+  xlim(xlims) + ylim(ylims) +
+  geom_vline(xintercept=0,color='black') + 
+  geom_hline(yintercept=0,color='black')
+print(p)
+ggsave(paste0(outf,"stage-shift-scatter-true.pdf"),width=figwidth,height=figheight)
+```
+
+
+
+
+
+```{r}
+ps <- rep(NA_real_,floor(NN/ntrial))
+beta1 <- rep(NA_real_,floor(NN/ntrial))
+for(ii in 1:length(ps)){
+  ix <- (ii-1)*ntrial+1
+  stage_mort_sub <- stage_mort[ix:(ix+ntrial-1),]
+  fit <- lm(MortRed~StageRed,data=stage_mort_sub)
+  beta1[ii] <- fit$coefficients[2]
+  ps[ii] <- summary(fit)$coefficients[2,4]
+}
+stage_type1 <- mean(ps < 0.05)
+stage_type1
+stage_meanbeta1 <- mean(beta1)
+stage_meanbeta1
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Random Stage Shift and Random Mortality Benefit, 0 Correlation
+
+
+### Small Sample Size
+
+```{r}
+## parameters for control arm
+pC <- FormatP(pCtrue_vec)
+rownames(pC) <- 0:1
+colnames(pC) <- 0:2
+pC_tab <- pC
+pC
+sum(pC)
+pC <- as.data.frame(as.table(pC))
+pC
+
+
+# res <- data.frame(Trial1=rep(NA_real_,N),Trial2=rep(NA_real_,N),
+#                   Ratio=rep(NA_real_,N),Diff=rep(NA_real_,N),
+#                   MLE=rep(NA_real_,N))
+stage_mort <- data.frame(MortRed=rep(NA_real_,NN),
+                         StageRed=rep(NA_real_,NN))
+
+
+## stores probabilities
+##
+## in control
+## pC21 = prob. no cancer/early stage AND dead
+## pC12 = prob. late stage AND alive
+## pC22 = prob. late stage AND dead
+## 
+## pSXY is same but in screen population
+res <- data.frame(pC21=rep(NA_real_,NN),
+                  pC12=rep(NA_real_,NN),
+                  pC22=rep(NA_real_,NN),
+                  pS21=rep(NA_real_,NN),
+                  pS12=rep(NA_real_,NN),
+                  pS22=rep(NA_real_,NN))
+                  
+
+#rrs <- runif(N,min=0,max=0.005) ## how much reduction in late stage
+
+temp <- sum(pCtrue_vec[3:4])
+SRtrue <- (temp - (temp + (r3s + r4s)))/temp
+temp <- sum(pCtrue_vec[c(2,4)])
+MRtrue <- (temp - (temp + (r2s + r4s)))/temp
+SRtrue
+MRtrue
+tab <- table(SRtrue,MRtrue)
+tab
+
+temp <- data.frame(SRtrue,MRtrue)
+true_vals <- temp[!duplicated(temp),]
+
+
+for(ii in 1:NN){
+  ## parameters for screen arm
+  #rr <- rrs[ii]
+  ix <- sample(1:4,size=1)
+  pStrue_vec <- pCtrue_vec + c(r1s[ix],r2s[ix],r3s[ix],r4s[ix])
+  pS <- FormatP(pStrue_vec)
+  rownames(pS) <- 0:1
+  colnames(pS) <- 0:2
+  pS_tab <- pS
+  pS <- as.data.frame(as.table(pS))
+  ## generate data
+  CC <- cbind(pC[,1:2],n=rmultinom(n=1,size=n,prob=pC$Freq))  
+  SS <- cbind(pS[,1:2],n=rmultinom(n=1,size=m,prob=pS$Freq))
+  stage_mort[ii,1] <- MortRed(CC,SS)
+  stage_mort[ii,2] <- StageRed(CC,SS)
+  ## control  
+  res[ii,1] <- CC[CC$Var1==1 & CC$Var2==1,3] / sum(CC$n)
+  res[ii,2] <- CC[CC$Var1==0 & CC$Var2==2,3] / sum(CC$n)
+  res[ii,3] <- CC[CC$Var1==1 & CC$Var2==2,3] / sum(CC$n)
+  ## screen
+  res[ii,4] <- SS[SS$Var1==1 & SS$Var2==1,3] / sum(SS$n)
+  res[ii,5] <- SS[SS$Var1==0 & SS$Var2==2,3] / sum(SS$n)
+  res[ii,6] <- SS[SS$Var1==1 & SS$Var2==2,3] / sum(SS$n)
+  
+}
+```
+
+
+
+```{r}
+xlims <- range(c(stage_mort$StageRed,SRtrue))
+ylims <- range(c(stage_mort$MortRed,MRtrue))
+
+
+stage_mort$Trial <- paste0("Trial ",1:nrow(stage_mort))
+
+
+head(stage_mort)
+a <- lm(MortRed~StageRed,data=stage_mort)
+
+p <- ggplot(stage_mort,aes(x=StageRed,y=MortRed)) +
+  geom_point() + geom_smooth(method="lm",se=FALSE) +
+  geom_vline(xintercept=0,color='black') + 
+  geom_hline(yintercept=0,color='black') +
+  xlim(xlims) + ylim(ylims) +  
+  ylab(TeX("Estimated Mortality Reduction ($\\widehat{M}$)")) +
+  xlab(TeX("Estimated Late-Stage Incidence Reduction ($\\widehat{S}$)")) +
+  geom_point(data=true_vals, aes(x=SRtrue, y=MRtrue), color='red',shape=4,size=3,stroke=2)+
+  theme_bw()
+
+p <- p + geom_text(  x = 0.2,  # Adjust x and y coordinates as needed
+    y = -0.2,
+    label = TeX(paste0("$\\widehat{\\beta}_1$ = ",round(a$coefficients[2],2))),
+    color = "red")
+
+
+
+print(p)
+
+ggsave(paste0(outf,"mix-scatter-est-small.pdf"),width=figwidth,height=figheight)
+```
+
+
+```{r}
+ps <- rep(NA_real_,floor(NN/ntrial))
+beta1 <- rep(NA_real_,floor(NN/ntrial))
+for(ii in 1:length(ps)){
+  ix <- (ii-1)*ntrial+1
+  stage_mort_sub <- stage_mort[ix:(ix+ntrial-1),]
+  fit <- lm(MortRed~StageRed,data=stage_mort_sub)
+  beta1[ii] <- fit$coefficients[2]
+  ps[ii] <- summary(fit)$coefficients[2,4]
+}
+random_small_type1 <- mean(ps < 0.05)
+random_small_type1
+random_small_meanbeta1 <- mean(beta1)
+random_small_meanbeta1
+```
+
+
+
+
+
+
+
+### Large Sample Size
+
+
+```{r}
+n <- 100000
+m <- 100000
+```
+
+```{r}
+## parameters for control arm
+pC <- FormatP(pCtrue_vec)
+rownames(pC) <- 0:1
+colnames(pC) <- 0:2
+pC_tab <- pC
+pC
+sum(pC)
+pC <- as.data.frame(as.table(pC))
+pC
+
+
+# res <- data.frame(Trial1=rep(NA_real_,N),Trial2=rep(NA_real_,N),
+#                   Ratio=rep(NA_real_,N),Diff=rep(NA_real_,N),
+#                   MLE=rep(NA_real_,N))
+stage_mort <- data.frame(MortRed=rep(NA_real_,NN),
+                         StageRed=rep(NA_real_,NN))
+
+
+## stores probabilities
+##
+## in control
+## pC21 = prob. no cancer/early stage AND dead
+## pC12 = prob. late stage AND alive
+## pC22 = prob. late stage AND dead
+## 
+## pSXY is same but in screen population
+res <- data.frame(pC21=rep(NA_real_,NN),
+                  pC12=rep(NA_real_,NN),
+                  pC22=rep(NA_real_,NN),
+                  pS21=rep(NA_real_,NN),
+                  pS12=rep(NA_real_,NN),
+                  pS22=rep(NA_real_,NN))
+                  
+
+#rrs <- runif(N,min=0,max=0.005) ## how much reduction in late stage
+
+temp <- sum(pCtrue_vec[3:4])
+SRtrue <- (temp - (temp + (r3s + r4s)))/temp
+temp <- sum(pCtrue_vec[c(2,4)])
+MRtrue <- (temp - (temp + (r2s + r4s)))/temp
+SRtrue
+MRtrue
+tab <- table(SRtrue,MRtrue)
+tab
+
+temp <- data.frame(SRtrue,MRtrue)
+true_vals <- temp[!duplicated(temp),]
+
+
+for(ii in 1:NN){
+  ## parameters for screen arm
+  #rr <- rrs[ii]
+  ix <- sample(1:4,size=1)
+  pStrue_vec <- pCtrue_vec + c(r1s[ix],r2s[ix],r3s[ix],r4s[ix])
+  pS <- FormatP(pStrue_vec)
+  rownames(pS) <- 0:1
+  colnames(pS) <- 0:2
+  pS_tab <- pS
+  pS <- as.data.frame(as.table(pS))
+  ## generate data
+  CC <- cbind(pC[,1:2],n=rmultinom(n=1,size=n,prob=pC$Freq))  
+  SS <- cbind(pS[,1:2],n=rmultinom(n=1,size=m,prob=pS$Freq))
+  stage_mort[ii,1] <- MortRed(CC,SS)
+  stage_mort[ii,2] <- StageRed(CC,SS)
+  ## control  
+  res[ii,1] <- CC[CC$Var1==1 & CC$Var2==1,3] / sum(CC$n)
+  res[ii,2] <- CC[CC$Var1==0 & CC$Var2==2,3] / sum(CC$n)
+  res[ii,3] <- CC[CC$Var1==1 & CC$Var2==2,3] / sum(CC$n)
+  ## screen
+  res[ii,4] <- SS[SS$Var1==1 & SS$Var2==1,3] / sum(SS$n)
+  res[ii,5] <- SS[SS$Var1==0 & SS$Var2==2,3] / sum(SS$n)
+  res[ii,6] <- SS[SS$Var1==1 & SS$Var2==2,3] / sum(SS$n)
+  
+}
+```
+
+
+
+```{r}
+xlims <- range(c(stage_mort$StageRed,SRtrue))
+ylims <- range(c(stage_mort$MortRed,MRtrue))
+
+
+stage_mort$Trial <- paste0("Trial ",1:nrow(stage_mort))
+
+a <- lm(MortRed~StageRed,data=stage_mort)
+p <- ggplot(stage_mort,aes(x=StageRed,y=MortRed)) +
+  geom_point() + geom_smooth(method="lm",se=FALSE) +
+  geom_vline(xintercept=0,color='black') + 
+  geom_hline(yintercept=0,color='black') +
+  xlim(xlims) + ylim(ylims) +  
+  ylab(TeX("Estimated Mortality Reduction ($\\widehat{M}$)")) +
+  xlab(TeX("Estimated Late-Stage Incidence Reduction ($\\widehat{S}$)")) +
+  geom_point(data=true_vals, aes(x=SRtrue, y=MRtrue), color='red',shape=4,size=3,stroke=2)+
+  theme_bw()
+p <- p + geom_text(  x = 0.13,  # Adjust x and y coordinates as needed
+    y = -0.1,
+    label = TeX(paste0("$\\widehat{\\beta}_1$ = ",round(a$coefficients[2],2))),
+    color = "red")
+
+print(p)
+
+ggsave(paste0(outf,"mix-scatter-est-large.pdf"),width=figwidth,height=figheight)
+```
+
+
+
+
+
+
+
+```{r}
+ps <- rep(NA_real_,floor(NN/ntrial))
+beta1 <- rep(NA_real_,floor(NN/ntrial))
+for(ii in 1:length(ps)){
+  ix <- (ii-1)*ntrial+1
+  stage_mort_sub <- stage_mort[ix:(ix+ntrial-1),]
+  fit <- lm(MortRed~StageRed,data=stage_mort_sub)
+  beta1[ii] <- fit$coefficients[2]
+  ps[ii] <- summary(fit)$coefficients[2,4]
+}
+random_large_type1 <- mean(ps < 0.05)
+random_large_type1
+random_large_meanbeta1 <- mean(beta1)
+random_large_meanbeta1
+```
+
+
+
+
+
+
+
+## Output 
+
+### Simulation Parameters
+
+
+```{r}
+ConvertTable <- function(tab_out){
+  temp <- colSums(tab_out)
+  pCE <- temp[2]
+  pCL <- temp[3]
+  pSE <- temp[5]
+  pSL <- temp[6]
+  
+  pCD_E <- tab_out[2,2] / sum(tab_out[,2])
+  pCD_L <- tab_out[2,3] / sum(tab_out[,3])
+  pSD_E <- tab_out[2,5] / sum(tab_out[,5])
+  pSD_L <- tab_out[2,6] / sum(tab_out[,6])
+  
+  out <- matrix(c(pCE,pCL,pCD_E,pCD_L,
+                  pSE,pSL,pSD_E,pSD_L),
+                nrow=2,ncol=4,byrow=TRUE)
+  out <- data.frame(c("Control","Screen"),out)
+  colnames(out) <- c("","$p_E$","$p_L$","$p_{D|E}$","$p_{D|L}$")
+  return(out)
+}
+```
+
+
+
+
+
+```{r}
+out <- list()
+for(ii in 1:length(r1s)){
+  pStrue_vec <- pCtrue_vec + c(r1s[ii],r2s[ii],r3s[ii],r4s[ii])
+  pS <- FormatP(pStrue_vec)
+  rownames(pS) <- 0:1
+  colnames(pS) <- 0:2
+  pS_tab <- pS
+  tab_out <- cbind(FormatTable(pC_tab),FormatTable(pS_tab))
+  out[[ii]] <- ConvertTable(tab_out)
+}
+```
+
+
+
+```{r}
+out <- out <- do.call(rbind,out)
+cnames <- rep("",2*length(r1s))
+svals <- rep(NA_real_,2*length(r1s))
+mvals <- rep(NA_real_,2*length(r1s))
+cnames[2*(0:3)+1] <- paste0("Scenario ",1:length(r1s))
+svals[2*(0:3)+1] <- SRtrue
+mvals[2*(0:3)+1] <- MRtrue
+out <- cbind(cnames,out,svals,mvals)
+colnames(out)[1:2] <- c("","Arm")
+colnames(out)[(ncol(out)-1):ncol(out)] <- c("S","M")
+out
+```
+
+
+
+
+```{r}
+caption <- "Trial parameters.  \\label{tab:01-sim-params}"                            
+tab_out_tex <- kbl(out,booktabs=TRUE,format="latex",escape=FALSE,caption=caption,digits=3)
+save_kable(tab_out_tex,file=paste0(outf,"01-sim-params.tex"))
+tab_out_tex
+```
+
+
+
+
+### Simulation Parameters
+
+
+
+```{r}
+res <- data.frame("$\\beta_1$"=c("-","-","0","0"),
+                  "$\\mathbb{E}[\\widehat{\\beta}_1]$"=c(null_meanbeta1,stage_meanbeta1,random_small_meanbeta1,random_large_meanbeta1),
+                  "Type I Error"=c(null_type1,stage_type1,random_small_type1,random_large_type1),
+                  check.names=FALSE)
+rownames(res) <- paste0("Simulation ",LETTERS[1:4])
+caption <- "Simulation results.  \\label{tab:01-sim-results}"                            
+tab_out_tex <- kbl(res,booktabs=TRUE,format="latex",escape=FALSE,caption=caption,digits=2)
+save_kable(tab_out_tex,file=paste0(outf,"01-sim-results.tex"))
+tab_out_tex
+
+```
+
